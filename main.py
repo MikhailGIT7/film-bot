@@ -72,12 +72,8 @@ async def get_movie_by_genre(genre_id):
             return None
 
 async def on_startup(_: Dispatcher):
-    webhook_info = await bot.get_webhook_info()
-    if webhook_info.url != WEBHOOK_URL:
-        await bot.set_webhook(WEBHOOK_URL)
-        logging.info(f"Webhook обновлён на {WEBHOOK_URL}")
-    else:
-        logging.info("Webhook уже установлен")
+    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+    logging.info(f"Webhook принудительно установлен: {WEBHOOK_URL}")
 
 async def on_shutdown(_: Dispatcher):
     await bot.delete_webhook()
