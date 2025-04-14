@@ -1,74 +1,77 @@
 import logging
 import os
 import requests
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from dotenv import load_dotenv
+from aiogram.types import Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
+from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-TMDB_API_KEY = os.getenv("TMDB_API_KEY")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TOKEN = os.getenv("BOT_TOKEN")
+TMDB_TOKEN = os.getenv("TMDB_TOKEN")
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+WEBHOOK_URL = f"https://film-bot-jlbt.onrender.com{WEBHOOK_PATH}"
 
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(storage=MemoryStorage())
+bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher()
 
-genres = {
-    "драма": 18,
-    "комедия": 35,
-    "триллер": 53,
-    "фантастика": 878,
-    "боевик": 28,
-    "приключения": 12
-}
+async def fetch_movies_by_genre(genre_id):
+    url = "https://api.themoviedb.org/3/discover/movie"
+    params = {
+        "api_key": TMDB_TOKEN,
+        "with_genres": genre_id,
+        "language": "ru-RU",
+        "sort_by": "popularity.desc"
+    }
+    response = requests.get(url, params=params)
+    return response.json().get("results", [])[:5]
 
-@dp.message(F.text == "/start")
+@dp.message(commands=["start"])
 async def start_handler(message: Message):
-    await message.answer("Привет! Напиши /жанры, чтобы выбрать жанр фильма.")
+    await message.answer("Привет! Нажми /жанры чтобы выбрать жанр фильма.")
 
-@dp.message(F.text == "/жанры")
+@dp.message(commands=["жанры"])
 async def genre_handler(message: Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=genre.title(), callback_data=f"genre_{gid}")]
-            for genre, gid in genres.items()
-        ]
-    )
-    await message.answer("Выбери жанр:", reply_markup=keyboard)
+    genres = {
+        "Боевик": 28,
+        "Комедия": 35,
+        "Драма": 18,
+        "Фантастика": 878,
+        "Мелодрама": 10749
+    }
+    builder = InlineKeyboardBuilder()
+    for name, genre_id in genres.items():
+        builder.button(text=name, callback_data=f"genre_{genre_id}")
+    await message.answer("Выберите жанр:", reply_markup=builder.as_markup())
 
-@dp.callback_query(F.data.startswith("genre_"))
-async def genre_selected(callback_query):
+@dp.callback_query(lambda c: c.data.startswith("genre_"))
+async def handle_genre_callback(callback_query: types.CallbackQuery):
     genre_id = callback_query.data.split("_")[1]
-    response = requests.get(
-        "https://api.themoviedb.org/3/discover/movie",
-        params={"api_key": TMDB_API_KEY, "with_genres": genre_id, "sort_by": "popularity.desc", "language": "ru"}
-    )
-    data = response.json()
-    if data.get("results"):
-        movie = data["results"][0]
-        title = movie["title"]
-        overview = movie["overview"]
-        text = f"<b>{title}</b>
-
-{overview}"
+    movies = await fetch_movies_by_genre(genre_id)
+    for movie in movies:
+        title = movie.get("title")
+        overview = movie.get("overview")
+        rating = movie.get("vote_average")
+        text = (
+            f"<b>{title}</b>\n\n"
+            f"{overview}\n"
+            f"Рейтинг: {rating}"
+        )
         await callback_query.message.answer(text)
-    else:
-        await callback_query.message.answer("Не удалось найти фильмы.")
-    await callback_query.answer()
 
-async def on_startup(bot: Bot):
+async def on_startup(app):
     await bot.set_webhook(WEBHOOK_URL)
 
 app = web.Application()
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=f"/webhook/{BOT_TOKEN}")
-setup_application(app, dp, bot=bot, on_startup=on_startup)
+app["bot"] = bot
+SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+setup_application(app, dp, bot=bot)
+app.on_startup.append(on_startup)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     web.run_app(app, host="0.0.0.0", port=10000)
