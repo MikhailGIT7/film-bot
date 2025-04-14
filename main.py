@@ -10,7 +10,7 @@ import aiohttp
 
 TOKEN = os.getenv("BOT_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # e.g. 'https://your-render-url.onrender.com'
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -72,7 +72,12 @@ async def get_movie_by_genre(genre_id):
             return None
 
 async def on_startup(_: Dispatcher):
-    await bot.set_webhook(WEBHOOK_URL)
+    webhook_info = await bot.get_webhook_info()
+    if webhook_info.url != WEBHOOK_URL:
+        await bot.set_webhook(WEBHOOK_URL)
+        logging.info(f"Webhook обновлён на {WEBHOOK_URL}")
+    else:
+        logging.info("Webhook уже установлен")
 
 async def on_shutdown(_: Dispatcher):
     await bot.delete_webhook()
