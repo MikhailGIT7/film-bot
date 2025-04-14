@@ -1,3 +1,4 @@
+from aiogram.filters import Command
 import logging
 import os
 import requests
@@ -30,11 +31,11 @@ async def fetch_movies_by_genre(genre_id):
     response = requests.get(url, params=params)
     return response.json().get("results", [])[:5]
 
-@dp.message(commands=["start"])
+@dp.message(Command('start'))
 async def start_handler(message: Message):
     await message.answer("Привет! Нажми /жанры чтобы выбрать жанр фильма.")
 
-@dp.message(commands=["жанры"])
+@dp.message(Command('жанры'))
 async def genre_handler(message: Message):
     genres = {
         "Боевик": 28,
@@ -57,8 +58,10 @@ async def handle_genre_callback(callback_query: types.CallbackQuery):
         overview = movie.get("overview")
         rating = movie.get("vote_average")
         text = (
-            f"<b>{title}</b>\n\n"
-            f"{overview}\n"
+            f"<b>{title}</b>
+"
+            f"{overview}
+"
             f"Рейтинг: {rating}"
         )
         await callback_query.message.answer(text)
