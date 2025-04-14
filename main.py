@@ -91,4 +91,4 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
-    web.run_app(app, port=int(os.getenv("PORT", 8080)))
+    web.run_app(app, port=10000)
