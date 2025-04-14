@@ -1,87 +1,60 @@
+
 import logging
-import asyncio
 import os
-from aiogram import Bot, Dispatcher, F, types
-from aiogram.enums import ParseMode
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, Update
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.webhook import WebhookRequestHandler
 from aiohttp import web
-import aiohttp
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.router import Router
 
-# Получаем переменные окружения
-TOKEN = os.getenv("BOT_TOKEN")
-TMDB_API_KEY = os.getenv("TMDB_API_KEY")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # например: https://film-bot.onrender.com
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-WEBHOOK_PATH = f"/webhook/{TOKEN}"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://film-bot.onrender.com{WEBHOOK_PATH}"
 
-# Инициализация бота
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
+webhook_router = Router()
 
-GENRES = {
-    "🎭 Драма": 18,
-    "😂 Комедия": 35,
-    "💥 Боевик": 28,
-    "👻 Ужасы": 27,
-    "🧠 Триллер": 53,
-    "🚀 Фантастика": 878
-}
+# Хендлер команды /start
+@webhook_router.message(F.text == "/start")
+async def start_handler(message: Message):
+    await message.answer("Привет! Я бот, который поможет подобрать фильм на вечер 🍿")
 
-def genre_keyboard():
-    kb = InlineKeyboardMarkup()
-    for name in GENRES:
-        kb.add(InlineKeyboardButton(text=name, callback_data=f"genre:{name}"))
-    return kb
+# Добавляем роутер в диспетчер
+dp.include_router(webhook_router)
 
-@dp.message(F.text == "/start")
-async def start(message: Message):
-    await message.answer("Привет! Выбери жанр фильма:", reply_markup=genre_keyboard())
-
-@dp.callback_query(F.data.startswith("genre:"))
-async def genre_choice(callback: types.CallbackQuery):
-    genre_name = callback.data.split(":")[1]
-    genre_id = GENRES.get(genre_name)
-
-    movie = await get_movie_by_genre(genre_id)
-    if movie:
-        text = f"<b>{movie['title']}</b> ({movie['release_date'][:4]})\n⭐ {movie['vote_average']}\n\n{movie['overview']}"
-        poster_url = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}" if movie['poster_path'] else None
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Смотреть", url=f"https://www.google.com/search?q={movie['title']} смотреть онлайн")],
-                [InlineKeyboardButton(text="Другой", callback_data=f"genre:{genre_name}")]
-            ]
-        )
-        if poster_url:
-            await callback.message.answer_photo(poster_url, caption=text, reply_markup=kb)
-        else:
-            await callback.message.answer(text, reply_markup=kb)
-    else:
-        await callback.message.answer("Фильм не найден, попробуй другой жанр.")
-
-    await callback.answer()
-
-async def get_movie_by_genre(genre_id):
-    url = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&with_genres={genre_id}&sort_by=popularity.desc&language=ru"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            return data["results"][0] if data.get("results") else None
-
-# Обработка входящих запросов от Telegram
-async def webhook_handler(request):
-    body = await request.text()
-    update = types.Update.model_validate_json(body)
-    await dp.feed_update(bot, update)
+# Обработка webhook-запроса от Telegram
+@webhook_router.post(WEBHOOK_PATH)
+async def telegram_webhook(update: dict, request: web.Request):
+    telegram_update = Update.model_validate(update)
+    await dp.feed_update(bot, telegram_update)
     return web.Response()
 
-# Настройка aiohttp сервера
-app = web.Application()
-app.router.add_post(WEBHOOK_PATH, webhook_handler)
+# Создание веб-приложения
+async def on_startup(app: web.Application):
+    await bot.set_webhook(WEBHOOK_URL)
+    logger.info(f"Webhook установлен: {WEBHOOK_URL}")
 
+async def on_shutdown(app: web.Application):
+    await bot.delete_webhook()
+    logger.info("Webhook удалён")
+
+def create_app():
+    app = web.Application()
+    app["bot"] = bot
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    return app
+
+# Запуск
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True))
-    logging.info(f"Webhook установлен: {WEBHOOK_URL}")
-    web.run_app(app, port=10000)
+    web.run_app(create_app(), host="0.0.0.0", port=10000)
