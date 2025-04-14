@@ -1,80 +1,101 @@
-from aiogram.filters import Command
-import logging
+
+import asyncio
 import os
 import requests
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.enums import ParseMode
-from aiogram.types import Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
+from aiogram.utils.markdown import hbold
 from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 TMDB_TOKEN = os.getenv("TMDB_TOKEN")
-WEBHOOK_PATH = f"/webhook/{TOKEN}"
-WEBHOOK_URL = f"https://film-bot-jlbt.onrender.com{WEBHOOK_PATH}"
 
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-async def fetch_movies_by_genre(genre_id):
+GENRES = {
+    "драма": 18,
+    "комедия": 35,
+    "триллер": 53,
+    "ужасы": 27,
+    "фантастика": 878,
+    "боевик": 28
+}
+
+
+def get_movie_by_genre(genre_id):
     url = "https://api.themoviedb.org/3/discover/movie"
     params = {
         "api_key": TMDB_TOKEN,
         "with_genres": genre_id,
-        "language": "ru-RU",
-        "sort_by": "popularity.desc"
+        "sort_by": "popularity.desc",
+        "language": "ru"
     }
-    response = requests.get(url, params=params)
-    return response.json().get("results", [])[:5]
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        results = data.get("results", [])
+        if not results:
+            return None
+        return results[0]
+    except Exception as e:
+        print(f"Error fetching movie: {e}")
+        return None
 
-@dp.message(Command('start'))
-async def start_handler(message: Message):
-    await message.answer("Привет! Нажми /жанры чтобы выбрать жанр фильма.")
 
-@dp.message(Command('жанры'))
-async def genre_handler(message: Message):
-    genres = {
-        "Боевик": 28,
-        "Комедия": 35,
-        "Драма": 18,
-        "Фантастика": 878,
-        "Мелодрама": 10749
-    }
-    builder = InlineKeyboardBuilder()
-    for name, genre_id in genres.items():
-        builder.button(text=name, callback_data=f"genre_{genre_id}")
-    await message.answer("Выберите жанр:", reply_markup=builder.as_markup())
+@dp.message(F.text == "/start")
+async def start(message: types.Message):
+    await message.answer("Привет! Напиши /жанры, чтобы выбрать жанр фильма.")
 
-@dp.callback_query(lambda c: c.data.startswith("genre_"))
-async def handle_genre_callback(callback_query: types.CallbackQuery):
-    genre_id = callback_query.data.split("_")[1]
-    movies = await fetch_movies_by_genre(genre_id)
-    for movie in movies:
-        title = movie.get("title")
-        overview = movie.get("overview")
-        rating = movie.get("vote_average")
-        text = (
-            f"<b>{title}</b>
-"
-            f"{overview}
-"
-            f"Рейтинг: {rating}"
-        )
-        await callback_query.message.answer(text)
 
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
+@dp.message(F.text == "/жанры")
+async def show_genres(message: types.Message):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=genre.capitalize(), callback_data=genre)]
+            for genre in GENRES
+        ]
+    )
+    await message.answer("Выберите жанр:", reply_markup=keyboard)
 
-app = web.Application()
-app["bot"] = bot
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-setup_application(app, dp, bot=bot)
-app.on_startup.append(on_startup)
+
+@dp.callback_query()
+async def handle_genre(callback: types.CallbackQuery):
+    genre = callback.data.lower()
+    genre_id = GENRES.get(genre)
+    if not genre_id:
+        await callback.answer("Неизвестный жанр.")
+        return
+
+    movie = get_movie_by_genre(genre_id)
+    if not movie:
+        await callback.message.answer("Не удалось найти фильм.")
+        await callback.answer()
+        return
+
+    title = movie.get("title")
+    overview = movie.get("overview")
+    poster_path = movie.get("poster_path")
+    poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
+
+    text = f"<b>{title}</b>\n\n{overview}"
+
+    if poster_url:
+        await callback.message.answer_photo(photo=poster_url, caption=text, parse_mode=ParseMode.HTML)
+    else:
+        await callback.message.answer(text, parse_mode=ParseMode.HTML)
+
+    await callback.answer()
+
+
+async def main():
+    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    web.run_app(app, host="0.0.0.0", port=10000)
+    asyncio.run(main())
