@@ -1,60 +1,38 @@
 
-import logging
 import os
-
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, Update
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram.webhook import WebhookRequestHandler
-from aiohttp import web
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.router import Router
+from aiohttp import web
+from dotenv import load_dotenv
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-WEBHOOK_URL = f"https://film-bot.onrender.com{WEBHOOK_PATH}"
+if not BOT_TOKEN:
+    raise ValueError("No BOT_TOKEN found in environment variables")
 
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(storage=MemoryStorage())
-webhook_router = Router()
+dp = Dispatcher()
 
-# Хендлер команды /start
-@webhook_router.message(F.text == "/start")
-async def start_handler(message: Message):
-    await message.answer("Привет! Я бот, который поможет подобрать фильм на вечер 🍿")
+# Обработка команды /start
+@dp.message(commands=["start"])
+async def start_handler(message: types.Message):
+    await message.answer("Привет! Я помогу подобрать фильм на вечер 🎬")
 
-# Добавляем роутер в диспетчер
-dp.include_router(webhook_router)
-
-# Обработка webhook-запроса от Telegram
-@webhook_router.post(WEBHOOK_PATH)
-async def telegram_webhook(update: dict, request: web.Request):
-    telegram_update = Update.model_validate(update)
-    await dp.feed_update(bot, telegram_update)
+# Webhook handler
+async def handle_webhook(request: web.Request):
+    try:
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        print(f"Error in webhook: {e}")
     return web.Response()
 
-# Создание веб-приложения
-async def on_startup(app: web.Application):
-    await bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"Webhook установлен: {WEBHOOK_URL}")
+# Запуск aiohttp сервера
+app = web.Application()
+app.router.add_post(f"/webhook/{BOT_TOKEN}", handle_webhook)
 
-async def on_shutdown(app: web.Application):
-    await bot.delete_webhook()
-    logger.info("Webhook удалён")
-
-def create_app():
-    app = web.Application()
-    app["bot"] = bot
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-    return app
-
-# Запуск
 if __name__ == "__main__":
-    web.run_app(create_app(), host="0.0.0.0", port=10000)
+    print(f"Webhook установлен: https://film-bot.onrender.com/webhook/{BOT_TOKEN}")
+    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
