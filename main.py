@@ -50,7 +50,7 @@ async def handle_genre(callback_query: types.CallbackQuery):
             movie = movies[0]
             title = movie["title"]
             overview = movie.get("overview", "Описание отсутствует.")
-            text = f"<b>{title}</b>
+            text = f"<b>{title}</b>"
 
 {overview}"
             await bot.send_message(callback_query.from_user.id, text)
