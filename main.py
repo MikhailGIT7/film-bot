@@ -1,96 +1,78 @@
 import logging
 import os
-from aiogram import Bot, Dispatcher, F, types
-from aiogram.types import Message, CallbackQuery
+import requests
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from dotenv import load_dotenv
-import requests
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_TOKEN = os.getenv("BOT_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
 GENRES = {
-    "28": "Экшен",
-    "35": "Комедия",
-    "18": "Драма",
-    "27": "Ужасы",
-    "10749": "Романтика",
-    "878": "Фантастика"
+    "Комедия": 35,
+    "Боевик": 28,
+    "Фантастика": 878,
+    "Драма": 18,
+    "Триллер": 53,
+    "Мелодрама": 10749
 }
 
-@dp.message(F.text == "/start")
-async def cmd_start(message: Message):
-    await message.answer("Привет! Я помогу подобрать фильм на вечер 🎬")
+@dp.message(lambda message: message.text == "/start")
+async def cmd_start(message: types.Message):
+    await message.answer("Привет! Я помогу выбрать фильм на вечер. Напиши /жанры, чтобы выбрать жанр.")
 
-@dp.message(F.text == "/жанры")
-async def cmd_genres(message: Message):
-    kb = InlineKeyboardBuilder()
-    for genre_id, genre_name in GENRES.items():
-        kb.button(text=genre_name, callback_data=f"genre_{genre_id}")
-    kb.adjust(2)
-    await message.answer("Выбери жанр:", reply_markup=kb.as_markup())
+@dp.message(lambda message: message.text == "/жанры")
+async def cmd_genres(message: types.Message):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=genre, callback_data=f"genre_{genre}")] for genre in GENRES
+    ])
+    await message.answer("Выбери жанр:", reply_markup=keyboard)
 
-@dp.callback_query(F.data.startswith("genre_"))
-async def genre_selected(callback: CallbackQuery):
-    genre_id = callback.data.split("_")[1]
-    genre_name = GENRES.get(genre_id, "Жанр")
+@dp.callback_query(lambda c: c.data.startswith("genre_"))
+async def handle_genre(callback_query: types.CallbackQuery):
+    genre_name = callback_query.data.split("_")[1]
+    genre_id = GENRES.get(genre_name)
+    if genre_id:
+        url = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&with_genres={genre_id}&sort_by=popularity.desc"
+        response = requests.get(url).json()
+        movies = response.get("results", [])
+        if movies:
+            movie = movies[0]
+            title = movie["title"]
+            overview = movie.get("overview", "Описание отсутствует.")
+            text = f"<b>{title}</b>
 
-    url = f"https://api.themoviedb.org/3/discover/movie"
-    params = {
-        "api_key": TMDB_API_KEY,
-        "with_genres": genre_id,
-        "sort_by": "popularity.desc",
-        "language": "ru-RU",
-        "page": 1
-    }
+{overview}"
+            await bot.send_message(callback_query.from_user.id, text)
+        else:
+            await bot.send_message(callback_query.from_user.id, "Фильмы не найдены.")
+    else:
+        await bot.send_message(callback_query.from_user.id, "Ошибка при выборе жанра.")
+    await callback_query.answer()
 
-    response = requests.get(url, params=params)
-    data = response.json()
-    movies = data.get("results", [])
-    if not movies:
-        await callback.message.answer("Не удалось найти фильмы по жанру.")
-        return
+async def on_startup(bot: Bot) -> None:
+    webhook_url = f"{WEBHOOK_URL}/webhook/{API_TOKEN}"
+    await bot.set_webhook(webhook_url)
+    logging.info(f"Webhook установлен: {webhook_url}")
 
-    movie = movies[0]
-    title = movie.get("title", "Фильм")
-    overview = movie.get("overview", "Описание недоступно.")
-    rating = movie.get("vote_average", "–")
-
-    text = f"<b>{title}</b>
-
-{overview}
-
-Рейтинг: {rating} ⭐️"
-    await callback.message.answer(text)
-    await callback.answer()
-
-# Webhook
-async def handle_webhook(request):
-    body = await request.json()
-    update = types.Update(**body)
-    await dp.feed_update(bot, update)
-    return web.Response()
-
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"Webhook установлен: {WEBHOOK_URL}")
-
-def start():
-    logging.basicConfig(level=logging.INFO)
+async def main():
     app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, handle_webhook)
-    app.on_startup.append(on_startup)
-    web.run_app(app, port=10000)
+    dp.startup.register(on_startup)
+    webhook_path = f"/webhook/{API_TOKEN}"
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=webhook_path)
+    setup_application(app, dp, bot=bot)
+    return app
 
 if __name__ == "__main__":
-    start()
+    logging.basicConfig(level=logging.INFO)
+    web.run_app(main(), host="0.0.0.0", port=10000)
