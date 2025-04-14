@@ -71,13 +71,6 @@ async def get_movie_by_genre(genre_id):
                 return data["results"][0]
             return None
 
-async def on_startup(_: Dispatcher):
-    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
-    logging.info(f"Webhook принудительно установлен: {WEBHOOK_URL}")
-
-async def on_shutdown(_: Dispatcher):
-    await bot.delete_webhook()
-
 async def webhook_handler(request):
     body = await request.text()
     update = types.Update.model_validate_json(body)
@@ -89,6 +82,7 @@ app.router.add_post(WEBHOOK_PATH, webhook_handler)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
+    dp.include_router(dp)  # just in case
+    asyncio.run(bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True))
+    logging.info(f"Webhook установлен вручную: {WEBHOOK_URL}")
     web.run_app(app, port=10000)
