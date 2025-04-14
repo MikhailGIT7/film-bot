@@ -1,6 +1,6 @@
 
 import os
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiohttp import web
 from dotenv import load_dotenv
@@ -14,8 +14,8 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# Обработка команды /start
-@dp.message(commands=["start"])
+# Обработка команды /start через фильтр текста
+@dp.message(F.text == "/start")
 async def start_handler(message: types.Message):
     await message.answer("Привет! Я помогу подобрать фильм на вечер 🎬")
 
