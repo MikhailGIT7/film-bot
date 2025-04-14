@@ -1,7 +1,7 @@
 
 import os
 import logging
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -26,11 +26,11 @@ GENRES = [
     "Триллер", "Анимация", "Документальный", "Приключения"
 ]
 
-@dp.message(lambda message: message.text == "/start")
+@dp.message(F.text == "/start")
 async def cmd_start(message: Message):
     await message.answer("Привет! Я помогу подобрать фильм на вечер 🎬")
 
-@dp.message(lambda message: message.text == "/жанры")
+@dp.message(F.text == "/жанры")
 async def cmd_genres(message: Message):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -40,7 +40,7 @@ async def cmd_genres(message: Message):
     )
     await message.answer("Выберите жанр:", reply_markup=keyboard)
 
-@dp.callback_query(lambda call: call.data.startswith("genre_"))
+@dp.callback_query(F.data.startswith("genre_"))
 async def handle_genre_selection(callback_query: types.CallbackQuery):
     genre = callback_query.data.split("_", 1)[1]
     await callback_query.message.answer(f"Вы выбрали жанр: {genre}")
