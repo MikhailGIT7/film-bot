@@ -82,7 +82,6 @@ app.router.add_post(WEBHOOK_PATH, webhook_handler)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    dp.include_router(dp)  # just in case
     asyncio.run(bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True))
     logging.info(f"Webhook установлен вручную: {WEBHOOK_URL}")
     web.run_app(app, port=10000)
