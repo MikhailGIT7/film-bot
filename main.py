@@ -1,10 +1,11 @@
-
-import os
 import logging
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+import os
+
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -15,52 +16,44 @@ WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+router = Router()
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
-
-GENRES = [
-    "Боевик", "Комедия", "Драма", "Фантастика", "Ужасы", "Мелодрама",
-    "Триллер", "Анимация", "Документальный", "Приключения"
-]
-
-@dp.message(F.text == "/start")
-async def cmd_start(message: Message):
+@router.message(F.text == "/start")
+async def start_handler(message: Message):
     await message.answer("Привет! Я помогу подобрать фильм на вечер 🎬")
 
-@dp.message(F.text == "/жанры")
-async def cmd_genres(message: Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=genre, callback_data=f"genre_{genre}")]
-            for genre in GENRES
-        ]
-    )
-    await message.answer("Выберите жанр:", reply_markup=keyboard)
+@router.message(F.text == "/жанры")
+async def genres_handler(message: Message):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎭 Драма", callback_data="genre_drama")],
+        [InlineKeyboardButton(text="😂 Комедия", callback_data="genre_comedy")],
+        [InlineKeyboardButton(text="🎬 Боевик", callback_data="genre_action")],
+        [InlineKeyboardButton(text="😱 Ужасы", callback_data="genre_horror")],
+    ])
+    await message.answer("Выбери жанр:", reply_markup=keyboard)
 
-@dp.callback_query(F.data.startswith("genre_"))
-async def handle_genre_selection(callback_query: types.CallbackQuery):
-    genre = callback_query.data.split("_", 1)[1]
-    await callback_query.message.answer(f"Вы выбрали жанр: {genre}")
+@router.callback_query(F.data.startswith("genre_"))
+async def genre_callback_handler(callback_query):
+    genre = callback_query.data.replace("genre_", "")
+    await callback_query.message.answer(f"Ты выбрал жанр: {genre.capitalize()}")
     await callback_query.answer()
 
 async def on_startup(bot: Bot):
     await bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"Webhook установлен: {WEBHOOK_URL}")
-
-async def on_shutdown(bot: Bot):
-    await bot.delete_webhook()
+    logging.info(f"Webhook установлен: {WEBHOOK_URL}")
 
 async def main():
-    app = web.Application()
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
+    logging.basicConfig(level=logging.INFO)
+    bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
 
+    app = web.Application()
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-    setup_application(app, dp, bot=bot)
+    setup_application(app, dp, bot=bot, on_startup=on_startup)
+
     return app
 
 if __name__ == "__main__":
-    web.run_app(main(), host="0.0.0.0", port=10000)
+    import asyncio
+    asyncio.run(web._run_app(main(), host="0.0.0.0", port=10000))
